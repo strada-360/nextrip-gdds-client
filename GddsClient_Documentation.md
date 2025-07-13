@@ -64,7 +64,7 @@ message TerminationResponse {
 
 ### C# Client
 
-- **Source**: [GddsClient.cs](https://github.com/your-organization/gdds-streaming/blob/main/GddsStreaming.Client/GddsClient.cs) (replace with actual path).
+- **Source**: [GddsClient.cs](https://github.com/strada-360/nextrip-gdds-client/blob/main/samples/GddsClient.cs).
 - **Key Components**:
   - `GddsClient`: Manages the gRPC channel, client ID, and subscription lifecycle.
   - `GetClientIdAsync`: Requests a client ID from the server.
