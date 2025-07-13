@@ -15,7 +15,7 @@ The clients follow a gRPC client-side streaming model, interacting with the `Gdd
 
 ### Proto File
 
-The clients use the same Protocol Buffers (`.proto`) file as the server, defining the service and message structures. The proto file is available at: [gdds.proto](https://github.com/your-organization/gdds-streaming/blob/main/GddsStreaming/Protos/gdds.proto) (replace with actual path).
+The clients use the same Protocol Buffers (`.proto`) file as the server, defining the service and message structures. The proto file is available at: [gdds.proto](https://github.com/strada-360/nextrip-gdds-client/blob/main/gdds.proto).
 
 ```proto
 syntax = "proto3";
