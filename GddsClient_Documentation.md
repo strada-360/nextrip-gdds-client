@@ -91,7 +91,7 @@ message TerminationResponse {
 
 ### Java Client
 
-- **Source**: [GddsClient.java](https://github.com/your-organization/gdds-streaming/blob/main/GddsStreaming.Client.Java/src/main/java/com/gddsstreaming/client/GddsClient.java) (replace with actual path).
+- **Source**: [GddsClient.java](https://github.com/strada-360/nextrip-gdds-client/blob/main/samples/GddsClient.java).
 - **Key Components**:
   - `GddsClient`: Manages the gRPC channel, stubs, and subscription lifecycle.
   - `getClientId`: Requests a client ID using a blocking stub.
