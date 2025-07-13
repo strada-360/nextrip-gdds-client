@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `GddsClient` implementations in C#, Java, and Python provide client-side functionality to interact with the `GddsStreamService`, a gRPC-based server that streams GNSS Derived Data Stream (GDDS) records. The clients support requesting a unique client ID, subscribing to the GDDS stream, receiving messages, and terminating subscriptions. Each client is designed to handle errors gracefully and manage resources effectively.
+The `GddsClient` implementations in C#, Java, and Python provide client-side functionality to interact with the `GddsStreamService`, a gRPC-based server that streams GPS Data Distribution System (GDDS) records. The clients support requesting a unique client ID, subscribing to the GDDS stream, receiving messages, and terminating subscriptions. Each client is designed to handle errors gracefully and manage resources effectively.
 
 The client implementations are hosted on GitHub at: [GddsStreaming Repository](https://github.com/strada-360/nextrip-gdds-client/tree/main/samples).
 
