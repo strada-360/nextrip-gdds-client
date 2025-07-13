@@ -125,7 +125,7 @@ message TerminationResponse {
 
 ### Python Client
 
-- **Source**: [gdds_client.py](https://github.com/your-organization/gdds-streaming/blob/main/GddsStreaming.Client.Python/gdds_client.py) (replace with actual path).
+- **Source**: [gdds_client.py](https://github.com/strada-360/nextrip-gdds-client/blob/main/samples/gdds_client.py).
 - **Key Components**:
   - `GddsClient`: Manages the gRPC channel, stub, and subscription lifecycle.
   - `get_client_id`: Requests a client ID.
