@@ -1,3 +1,4 @@
+
 import grpc
 import threading
 from datetime import datetime, timezone
@@ -9,6 +10,26 @@ from proto.gdds_streaming_pb2 import (
     GddsStreamServiceStub
 )
 from proto.gdds_streaming_pb2_grpc import GddsStreamServiceStub
+
+class ApiKeyClientInterceptor(grpc.UnaryUnaryClientInterceptor, grpc.StreamUnaryClientInterceptor):
+    def __init__(self, api_key):
+        if not api_key:
+            raise ValueError("API key is required")
+        self.api_key = api_key
+
+    def _add_api_key(self, metadata):
+        if metadata is None:
+            metadata = []
+        metadata.append(('x-api-key', self.api_key))
+        return metadata
+
+    def intercept_unary_unary(self, continuation, client_call_details, request):
+        new_details = client_call_details._replace(metadata=self._add_api_key(client_call_details.metadata))
+        return continuation(request, new_details)
+
+    def intercept_stream_unary(self, continuation, client_call_details, request_iterator):
+        new_details = client_call_details._replace(metadata=self._add_api_key(client_call_details.metadata))
+        return continuation(request_iterator, new_details)
 
 class VehicleType:
     UNKNOWN = 0
@@ -28,13 +49,18 @@ class VehicleType:
         }.get(value, "UNKNOWN")
 
 class GddsClient:
-    def __init__(self, server_address):
+    def __init__(self, server_address, api_key):
         if not server_address:
             raise ValueError("Server address is required")
+        if not api_key:
+            raise ValueError("API key is required")
         
         self.server_address = server_address
         self.client_id = None
-        self._channel = grpc.insecure_channel(server_address)  # Use insecure_channel for simplicity; configure SSL for production
+        self._channel = grpc.intercept_channel(
+            grpc.insecure_channel(server_address),  # Use insecure_channel for simplicity; configure SSL for production
+            ApiKeyClientInterceptor(api_key)
+        )
         self._stub = GddsStreamServiceStub(self._channel)
         self._stop_event = threading.Event()
 
@@ -44,10 +70,12 @@ class GddsClient:
             self.client_id = response.clientId
             return self.client_id
         except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.UNAUTHENTICATED:
+                raise RuntimeError(f"Authentication failed: {e.details()}")
             raise RuntimeError(f"Failed to generate client ID: {e}")
 
     def start_receiving(self):
-|        if not self.client_id:
+        if not self.client_id:
             raise RuntimeError("Client ID not set. Call get_client_id first.")
 
         try:
@@ -73,7 +101,7 @@ class GddsClient:
             if status_code == grpc.StatusCode.CANCELLED:
                 print(f"Client {self.client_id} subscription was cancelled.")
             elif status_code == grpc.StatusCode.UNAUTHENTICATED:
-                print(f"Client {self.client_id} failed to subscribe: Invalid or unauthorized client ID.")
+                print(f"Client {self.client_id} failed to subscribe: {e.details()}")
             else:
                 print(f"Error in subscription for client {self.client_id}: {e}")
             self._stop_event.set()
@@ -94,7 +122,10 @@ class GddsClient:
 
             self._stop_event.set()
         except grpc.RpcError as e:
-            print(f"Error terminating client {self.client_id}: {e}")
+            if e.code() == grpc.StatusCode.UNAUTHENTICATED:
+                print(f"Client {self.client_id} failed to terminate: {e.details()}")
+            else:
+                print(f"Error terminating client {self.client_id}: {e}")
             self._stop_event.set()
 
     def close(self):
@@ -109,8 +140,9 @@ class GddsClient:
 
 def main():
     server_address = "localhost:50051"  # Replace with your server address
+    api_key = "valid-api-key-123"  # Replace with your API key
 
-    with GddsClient(server_address) as client:
+    with GddsClient(server_address, api_key) as client:
         # Request a client ID
         client_id = client.get_client_id()
         print(f"Received client ID: {client_id}")
