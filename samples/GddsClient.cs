@@ -1,4 +1,5 @@
 using Grpc.Core;
+using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
 using System;
 using System.Threading;
@@ -6,29 +7,73 @@ using System.Threading.Tasks;
 
 namespace GddsStreaming.Client
 {
-    public class GddsClient
+    /// <summary>
+    /// Interceptor for attaching API key to outgoing gRPC requests.
+    /// </summary>
+    public class ApiKeyClientInterceptor : Interceptor
+    {
+        private readonly string _apiKey;
+
+        public ApiKeyClientInterceptor(string apiKey)
+        {
+            _apiKey = apiKey ?? throw new ArgumentNullException(nameof(apiKey));
+        }
+
+        public override AsyncUnaryCall<TResponse> AsyncUnaryCall<TRequest, TResponse>(
+            TRequest request,
+            ClientInterceptorContext<TRequest, TResponse> context,
+            AsyncUnaryCallContinuation<TRequest, TResponse> continuation)
+        {
+            var metadata = context.Options.Metadata ?? new Metadata();
+            metadata.Add("x-api-key", _apiKey);
+            var newOptions = context.Options.WithMetadata(metadata);
+            var newContext = new ClientInterceptorContext<TRequest, TResponse>(context.Method, context.Host, newOptions);
+            return continuation(request, newContext);
+        }
+
+        public override AsyncServerStreamingCall<TResponse> AsyncServerStreamingCall<TRequest, TResponse>(
+            TRequest request,
+            ClientInterceptorContext<TRequest, TResponse> context,
+            AsyncServerStreamingCallContinuation<TRequest, TResponse> continuation)
+        {
+            var metadata = context.Options.Metadata ?? new Metadata();
+            metadata.Add("x-api-key", _apiKey);
+            var newOptions = context.Options.WithMetadata(metadata);
+            var newContext = new ClientInterceptorContext<TRequest, TResponse>(context.Method, context.Host, newOptions);
+            return continuation(request, newContext);
+        }
+    }
+
+    /// <summary>
+    /// Client for interacting with the GddsStreamService to receive GPS Data Distribution System (GDDS) records.
+    /// </summary>
+    public class GddsClient : IDisposable
     {
         private readonly GddsStreamService.GddsStreamServiceClient _client;
         private readonly string _serverAddress;
         private string? _clientId;
         private readonly CancellationTokenSource _cancellationTokenSource;
 
-        public GddsClient(string serverAddress)
+        public GddsClient(string serverAddress, string apiKey)
         {
             if (string.IsNullOrEmpty(serverAddress))
-                throw new ArgumentException("Server address is required", nameof(serverAddress));
+                throw new ArgumentException("Server address cannot be null or empty", nameof(serverAddress));
+            if (string.IsNullOrEmpty(apiKey))
+                throw new ArgumentException("API key cannot be null or empty", nameof(apiKey));
 
             _serverAddress = serverAddress;
             _cancellationTokenSource = new CancellationTokenSource();
 
-            // Create gRPC channel and client
             var channel = GrpcChannel.ForAddress(serverAddress, new GrpcChannelOptions
             {
-                // Optional: Configure channel options (e.g., SSL, credentials)
+                Interceptors = { new ApiKeyClientInterceptor(apiKey) }
             });
             _client = new GddsStreamService.GddsStreamServiceClient(channel);
         }
 
+        /// <summary>
+        /// Requests a unique client ID from the server.
+        /// </summary>
         public async Task<string> GetClientIdAsync()
         {
             try
@@ -37,12 +82,19 @@ namespace GddsStreaming.Client
                 _clientId = response.ClientId;
                 return _clientId;
             }
-            catch (Exception ex)
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.Unauthenticated)
             {
-                throw new Exception($"Failed to generate client ID: {ex.Message}", ex);
+                throw new Exception($"Authentication failed: {ex.Status.Detail}", ex);
+            }
+            catch (RpcException ex)
+            {
+                throw new Exception($"Failed to generate client ID: {ex.Status.Detail}", ex);
             }
         }
 
+        /// <summary>
+        /// Subscribes to the GDDS stream and processes incoming messages.
+        /// </summary>
         public async Task StartReceivingAsync()
         {
             if (string.IsNullOrEmpty(_clientId))
@@ -52,18 +104,16 @@ namespace GddsStreaming.Client
 
             try
             {
-                // Subscribe to the GDDS stream
                 var subscriptionRequest = new SubscriptionRequest { ClientId = _clientId };
                 using var streamingCall = _client.Subscribe(subscriptionRequest, cancellationToken: _cancellationTokenSource.Token);
 
                 Console.WriteLine($"Client {_clientId} subscribed to GDDS stream.");
 
-                // Asynchronously read messages from the stream
                 await foreach (var gddsMessage in streamingCall.ResponseStream.ReadAllAsync(_cancellationTokenSource.Token))
                 {
-                    Console.WriteLine($"Received GDDS: IP={gddsMessage.Ip}, Vehicle={gddsMessage.Veh}, " +
-                        $"Lat={gddsMessage.Lat}, Lon={gddsMessage.Lon}, Speed={gddsMessage.Spd}, " +
-                        $"Bearing={gddsMessage.Hdg}, TransitMode={(VehicleType)gddsMessage.TrnTyp}, " +
+                    Console.WriteLine($"Received GDDS: IP={gddsMessage.Ip}, VehicleNumber={gddsMessage.Veh}, " +
+                        $"Lat={gddsMessage.Lat:F6}, Lon={gddsMessage.Lon:F6}, Speed={gddsMessage.Spd:F2}, " +
+                        $"Bearing={gddsMessage.Hdg:F2}, TransitMode={(VehicleType)gddsMessage.TrnTyp}, " +
                         $"Timestamp={DateTimeFromUnixMs(gddsMessage.Tm)}, " +
                         $"ServerTimestamp={DateTimeFromUnixMs(gddsMessage.Svrtm)}, Message={gddsMessage.Msg}");
                 }
@@ -74,14 +124,21 @@ namespace GddsStreaming.Client
             }
             catch (RpcException ex) when (ex.StatusCode == StatusCode.Unauthenticated)
             {
-                Console.WriteLine($"Client {_clientId} failed to subscribe: Invalid or unauthorized client ID.");
+                Console.WriteLine($"Client {_clientId} failed to subscribe: {ex.Status.Detail}");
             }
-            catch (Exception ex)
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.AlreadyExists)
             {
-                Console.WriteLine($"Error in subscription for client {_clientId}: {ex.Message}");
+                Console.WriteLine($"Client {_clientId} failed to subscribe: {ex.Status.Detail}");
+            }
+            catch (RpcException ex)
+            {
+                Console.WriteLine($"Error in subscription for client {_clientId}: {ex.Status.Detail}");
             }
         }
 
+        /// <summary>
+        /// Terminates the subscription and cleans up resources.
+        /// </summary>
         public async Task TerminateAsync()
         {
             if (string.IsNullOrEmpty(_clientId))
@@ -92,25 +149,22 @@ namespace GddsStreaming.Client
 
             try
             {
-                // Send termination request
                 var terminationRequest = new TerminationRequest { ClientId = _clientId };
                 var response = await _client.TerminateAsync(terminationRequest);
 
-                if (response.Success)
-                {
-                    Console.WriteLine($"Client {_clientId} successfully terminated subscription.");
-                }
-                else
-                {
-                    Console.WriteLine($"Client {_clientId} termination failed.");
-                }
+                Console.WriteLine(response.Success
+                    ? $"Client {_clientId} successfully terminated subscription."
+                    : $"Client {_clientId} termination failed.");
 
-                // Cancel the streaming operation
                 _cancellationTokenSource.Cancel();
             }
-            catch (Exception ex)
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.Unauthenticated)
             {
-                Console.WriteLine($"Error terminating client {_clientId}: {ex.Message}");
+                Console.WriteLine($"Client {_clientId} failed to terminate: {ex.Status.Detail}");
+            }
+            catch (RpcException ex)
+            {
+                Console.WriteLine($"Error terminating client {_clientId}: {ex.Status.Detail}");
             }
         }
 
@@ -135,31 +189,36 @@ namespace GddsStreaming.Client
         Motorcycle = 4
     }
 
-    // Example usage
+    /// <summary>
+    /// Example usage of the GddsClient.
+    /// </summary>
     public class Program
     {
         public static async Task Main()
         {
-            string serverAddress = "https://localhost:5001"; // Replace with your server address
+            // Replace {SERVER_ADDRESS} with the actual server address (e.g., https://localhost:5001)
+            string serverAddress = "{SERVER_ADDRESS}";
+            string apiKey = "valid-api-key-123"; // Replace with actual API key
 
-            using var client = new GddsClient(serverAddress);
+            using var client = new GddsClient(serverAddress, apiKey);
 
-            // Request a client ID from the server
-            string clientId = await client.GetClientIdAsync();
-            Console.WriteLine($"Received client ID: {clientId}");
+            try
+            {
+                string clientId = await client.GetClientIdAsync();
+                Console.WriteLine($"Received client ID: {clientId}");
 
-            // Start receiving in a background task
-            var receiveTask = client.StartReceivingAsync();
+                var receiveTask = client.StartReceivingAsync();
 
-            // Simulate some work or wait for user input
-            Console.WriteLine("Press any key to terminate the subscription...");
-            Console.ReadKey();
+                Console.WriteLine("Press Enter to terminate the subscription...");
+                Console.ReadLine();
 
-            // Terminate the subscription
-            await client.TerminateAsync();
-
-            // Wait for the receiving task to complete
-            await receiveTask;
+                await client.TerminateAsync();
+                await receiveTask;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Client error: {ex.Message}");
+            }
 
             Console.WriteLine("Client shut down.");
         }
