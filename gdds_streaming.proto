@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+option csharp_namespace = "strada.gdds.grpc.server";
+option java_multiple_files = true;
+option java_package = "com.strada360.packages";
+option java_outer_classname = "GddsService";
+
+package strada.gdds;
+
+message GddsMessage {
+    string veh = 1; // Vehicle number
+    int64 tm = 2;  // Timestamp
+    double lat = 3; // Latitude
+    double lon = 4; // Longitude
+    double hdg = 5; // Heading
+    double spd = 6; // Speed
+    int32 trnTyp = 7; // Transit mode
+    int64 svrTm = 8; // Server timestamp
+}
+
+message SubscriptionRequest {
+    string connectionToken = 1; // Client-provided unique token (e.g., UUIDv4)
+}
+
+message TerminationRequest {
+    string connectionToken = 1; // Client-provided token to identify connection
+}
+
+service GddsStreamService {
+    rpc Subscribe(SubscriptionRequest) returns (stream GddsMessage);
+    rpc Terminate(TerminationRequest) returns (TerminationResponse);
+}
+
+message TerminationResponse {
+    bool success = 1;
+}
