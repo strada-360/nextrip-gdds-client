@@ -1,167 +1,38 @@
-
+import uuid
 import grpc
-import threading
-from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor
-from proto.gdds_streaming_pb2 import (
-    GenerateClientIdRequest,
-    SubscriptionRequest,
-    TerminationRequest,
-    GddsStreamServiceStub
-)
-from proto.gdds_streaming_pb2_grpc import GddsStreamServiceStub
-
-class ApiKeyClientInterceptor(grpc.UnaryUnaryClientInterceptor, grpc.StreamUnaryClientInterceptor):
-    def __init__(self, api_key):
-        if not api_key:
-            raise ValueError("API key is required")
-        self.api_key = api_key
-
-    def _add_api_key(self, metadata):
-        if metadata is None:
-            metadata = []
-        metadata.append(('x-api-key', self.api_key))
-        return metadata
-
-    def intercept_unary_unary(self, continuation, client_call_details, request):
-        new_details = client_call_details._replace(metadata=self._add_api_key(client_call_details.metadata))
-        return continuation(request, new_details)
-
-    def intercept_stream_unary(self, continuation, client_call_details, request_iterator):
-        new_details = client_call_details._replace(metadata=self._add_api_key(client_call_details.metadata))
-        return continuation(request_iterator, new_details)
-
-class VehicleType:
-    UNKNOWN = 0
-    CAR = 1
-    TRUCK = 2
-    BUS = 3
-    MOTORCYCLE = 4
-
-    @staticmethod
-    def to_string(value):
-        return {
-            0: "UNKNOWN",
-            1: "CAR",
-            2: "TRUCK",
-            3: "BUS",
-            4: "MOTORCYCLE"
-        }.get(value, "UNKNOWN")
-
-class GddsClient:
-    def __init__(self, server_address, api_key):
-        if not server_address:
-            raise ValueError("Server address is required")
-        if not api_key:
-            raise ValueError("API key is required")
-        
-        self.server_address = server_address
-        self.client_id = None
-        self._channel = grpc.intercept_channel(
-            grpc.insecure_channel(server_address),  # Use insecure_channel for simplicity; configure SSL for production
-            ApiKeyClientInterceptor(api_key)
-        )
-        self._stub = GddsStreamServiceStub(self._channel)
-        self._stop_event = threading.Event()
-
-    def get_client_id(self):
-        try:
-            response = self._stub.GenerateClientId(GenerateClientIdRequest())
-            self.client_id = response.clientId
-            return self.client_id
-        except grpc.RpcError as e:
-            if e.code() == grpc.StatusCode.UNAUTHENTICATED:
-                raise RuntimeError(f"Authentication failed: {e.details()}")
-            raise RuntimeError(f"Failed to generate client ID: {e}")
-
-    def start_receiving(self):
-        if not self.client_id:
-            raise RuntimeError("Client ID not set. Call get_client_id first.")
-
-        try:
-            request = SubscriptionRequest(clientId=self.client_id)
-            response_iterator = self._stub.Subscribe(request)
-
-            print(f"Client {self.client_id} subscribed to GDDS stream.")
-
-            for gdds_message in response_iterator:
-                if self._stop_event.is_set():
-                    break
-
-                timestamp = datetime.fromtimestamp(gdds_message.tm / 1000.0, tz=timezone.utc)
-                server_timestamp = datetime.fromtimestamp(gdds_message.svrtm / 1000.0, tz=timezone.utc)
-
-                print(f"Received GDDS: IP={gdds_message.ip}, Vehicle={gdds_message.veh}, "
-                      f"Lat={gdds_message.lat}, Lon={gdds_message.lon}, Speed={gdds_message.spd}, "
-                      f"Bearing={gdds_message.hdg}, TransitMode={VehicleType.to_string(gdds_message.trnTyp)}, "
-                      f"Timestamp={timestamp}, ServerTimestamp={server_timestamp}, Message={gdds_message.msg}")
-
-        except grpc.RpcError as e:
-            status_code = e.code()
-            if status_code == grpc.StatusCode.CANCELLED:
-                print(f"Client {self.client_id} subscription was cancelled.")
-            elif status_code == grpc.StatusCode.UNAUTHENTICATED:
-                print(f"Client {self.client_id} failed to subscribe: {e.details()}")
-            else:
-                print(f"Error in subscription for client {self.client_id}: {e}")
-            self._stop_event.set()
-
-    def terminate(self):
-        if not self.client_id:
-            print("No client ID set. Nothing to terminate.")
-            return
-
-        try:
-            request = TerminationRequest(clientId=self.client_id)
-            response = self._stub.Terminate(request)
-
-            if response.success:
-                print(f"Client {self.client_id} successfully terminated subscription.")
-            else:
-                print(f"Client {self.client_id} termination failed.")
-
-            self._stop_event.set()
-        except grpc.RpcError as e:
-            if e.code() == grpc.StatusCode.UNAUTHENTICATED:
-                print(f"Client {self.client_id} failed to terminate: {e.details()}")
-            else:
-                print(f"Error terminating client {self.client_id}: {e}")
-            self._stop_event.set()
-
-    def close(self):
-        self._stop_event.set()
-        self._channel.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+from gdds_streaming_pb2 import SubscriptionRequest
+from gdds_streaming_pb2_grpc import GddsStreamServiceStub
 
 def main():
-    server_address = "localhost:50051"  # Replace with your server address
-    api_key = "valid-api-key-123"  # Replace with your API key
+    server_address = "{SERVER_ADDRESS}" # Replace with actual address
+    api_key = "valid-api-key-123" # Replace with your API key
+    token_file = "connection_token.txt"
+    connection_token = None
 
-    with GddsClient(server_address, api_key) as client:
-        # Request a client ID
-        client_id = client.get_client_id()
-        print(f"Received client ID: {client_id}")
+    # Load or generate connection token
+    try:
+        with open(token_file, "r") as f:
+            connection_token = f.read().strip()
+            print(f"Using saved connection token: {connection_token}")
+    except FileNotFoundError:
+        connection_token = str(uuid.uuid4())
+        with open(token_file, "w") as f:
+            f.write(connection_token)
+        print(f"Created new connection token: {connection_token}")
 
-        # Start receiving in a separate thread
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(client.start_receiving)
-
-            # Wait for user input to terminate
-            print("Press Enter to terminate the subscription...")
-            input()
-
-            # Terminate the subscription
-            client.terminate()
-
-            # Wait for the receiving thread to complete
-            future.result()
-
-        print("Client shut down.")
+    try:
+        with grpc.secure_channel(server_address, grpc.ssl_channel_credentials()) as channel:
+            stub = GddsStreamServiceStub(channel)
+            metadata = [("x-api-key", api_key)]
+            request = SubscriptionRequest(connectionToken=connection_token)
+            print(f"Connected with token: {connection_token}")
+            for message in stub.Subscribe(request, metadata=metadata):
+                print(f"Vehicle: {message.veh}, Location: ({message.lat}, {message.lon}), Time: {message.tm}, Server Time: {message.svrTm}")
+    except grpc.RpcError as e:
+        if e.code() == grpc.StatusCode.ALREADY_EXISTS:
+            print(f"Duplicate token {connection_token}. Please generate a new one.")
+        else:
+            print(f"Error: {e.details()}")
 
 if __name__ == "__main__":
     main()
