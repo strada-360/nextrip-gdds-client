@@ -5,9 +5,9 @@
 The `GddsClient` is a client implementation for interacting with the `GddsStreamService`, a gRPC-based server that streams GPS Data Distribution System (GDDS) records, a vehicle tracking system based on the NMEA industry standard. The client supports subscribing to real-time vehicle data streams and terminating specific connections. It is designed for a small number of clients (e.g., transit agencies or vendors), each with a unique API key and potentially multiple indefinite connections from different applications (e.g., mobile apps, web apps, backend services). Each connection is tracked using a client-generated `connectionToken` (e.g., UUIDv4), validated for uniqueness by the server. The client authenticates with the server using an API key provided in the `x-api-key` header, enabling transit agencies and developers to build applications for vehicle tracking, navigation, and trip prediction.
 
 Source code for client implementations is available at:
-- C#: [GddsClient.cs](https://github.com/your-organization/gdds-client-csharp) (replace with actual URL)
-- Java: [GddsClient.java](https://github.com/your-organization/gdds-client-java) (replace with actual URL)
-- Python: [gdds_client.py](https://github.com/your-organization/gdds-client-python) (replace with actual URL)
+- C#: [GddsClient.cs](https://github.com/strada-360/nextrip-gdds-client/blob/main/samples/GddsClient.cs) 
+- Java: [GddsClient.java](https://github.com/strada-360/nextrip-gdds-client/blob/main/samples/GddsClient.java)
+- Python: [gdds_client.py](https://github.com/strada-360/nextrip-gdds-client/blob/main/samples/gdds_client.py)
 
 ## gRPC Overview
 
@@ -36,7 +36,7 @@ By leveraging gRPC, the `GddsClient` achieves efficient, secure, and scalable co
 
 ## Proto File
 
-The client uses the following Protocol Buffers file to define the gRPC service: [gdds_streaming.proto](https://github.com/your-organization/gdds-streaming/blob/main/GddsStreaming/Protos/gdds_streaming.proto) (replace with actual path).
+The client uses the following Protocol Buffers file to define the gRPC service: [gdds_streaming.proto](https://github.com/strada-360/nextrip-gdds-client/blob/main/gdds_streaming.proto).
 
 ```proto
 syntax = "proto3";
