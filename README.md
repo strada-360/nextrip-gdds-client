@@ -4,4 +4,6 @@ GDDS subscriber repository that provides technical guidance to consumer data as 
 
 # Technical Documentation
 
-The GDDS Client documentation is available at [GDDS Client Documentation](./GddsClient_Documentation.md)
+The GDDS Client documentation is available at [GDDS Client Documentation](https://github.com/strada-360/nextrip-gdds-client/wiki/GddsClient-Technical-Documentation)
+
+
